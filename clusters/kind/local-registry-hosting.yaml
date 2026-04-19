@@ -1,0 +1,16 @@
+# Advertises the local registry to anything running inside the cluster
+# that looks for it (Tilt, skaffold, some Helm charts, CI tooling, etc.).
+# Per the KEP at https://github.com/kubernetes/enhancements/tree/master/keps/sig-cluster-lifecycle/generic/1755-communicating-a-local-registry
+# this ConfigMap's name + namespace are a stable contract.
+#
+# NOTE: the port here must match REG_PORT in the Makefile. If you change
+# one, change both.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:5001"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"

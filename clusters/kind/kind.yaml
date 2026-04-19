@@ -1,0 +1,98 @@
+# Aegis local development cluster.
+#
+# kind = Kubernetes IN Docker. Each "node" below is a Docker container
+# running a real kubelet. This is upstream Kubernetes — same API server,
+# same kubectl, same YAML as EKS. The only difference from prod is that
+# nodes are containers instead of VMs/bare-metal.
+#
+# Bring up with: make kind-up
+# Tear down with: make kind-down
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: aegis-local
+
+# -------------------------------------------------------------------
+# Local image registry wiring.
+#
+# Without this, every image we build locally would need
+# `kind load docker-image <img>` to be copied into each node — slow,
+# and nothing like how real clusters work. Real clusters pull from a
+# registry (ECR, GHCR). We mirror that pattern locally.
+#
+# The Makefile runs a separate `registry:2` Docker container on
+# localhost:5001. This block tells each node's containerd to look in
+# /etc/containerd/certs.d for per-registry mirror configs — the
+# Makefile writes a hosts.toml there after the cluster is up.
+#
+# Why port 5001 and not 5000? macOS Control Center (AirPlay Receiver)
+# squats on 5000 by default. 5001 avoids that fight.
+# -------------------------------------------------------------------
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+
+# -------------------------------------------------------------------
+# Node topology: 1 control-plane + 2 workers.
+#
+# Why multi-node even locally?
+#   - Lets NetworkPolicy cross-node enforcement be meaningful (a
+#     single-node cluster hides that behavior entirely).
+#   - Mirrors how Istio, PodDisruptionBudgets, and anti-affinity
+#     actually behave in prod.
+#   - Matches §5 Phase 1 milestone in PROJECT.md.
+#
+# Why not more workers? Each kind node is a full container with its
+# own kubelet + containerd — they cost RAM. Two workers is the sweet
+# spot for a 16 GB laptop that also has to run Istio + Prom + Loki +
+# Tempo + CNPG + Redis + five services.
+# -------------------------------------------------------------------
+nodes:
+  # --- Control plane ---
+  #
+  # Runs kube-apiserver, etcd, scheduler, controller-manager.
+  # We also schedule ingress-nginx onto this node (see the
+  # ingress-ready label below), which keeps the worker nodes free
+  # for application workloads.
+  - role: control-plane
+
+    # Kubeadm patch: add a kubelet node-label so ingress-nginx's
+    # Deployment (which has a nodeSelector for ingress-ready=true)
+    # lands here. Without this label, ingress-nginx would stay
+    # Pending forever and you'd be debugging scheduling for an hour.
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+
+    # Expose host 80/443 so https://<anything>.localtest.me on your
+    # Mac hits ingress-nginx inside the kind container.
+    #
+    # containerPort = port inside the kind node container (where
+    #   ingress-nginx listens via hostPort).
+    # hostPort = port on your laptop's localhost.
+    # listenAddress 127.0.0.1 = only localhost can reach this (not
+    #   other machines on your Wi-Fi) — small security hygiene win.
+    #
+    # If something else on your Mac already owns 80/443, change
+    # hostPort to e.g. 8080/8443 and adjust your ingress URLs.
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+
+  # --- Workers ---
+  #
+  # Application pods land here by default (control-plane has a
+  # NoSchedule taint that kubeadm applies automatically; ingress-nginx
+  # tolerates it via its Helm values).
+  - role: worker
+  - role: worker
