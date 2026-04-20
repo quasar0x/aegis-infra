@@ -1,0 +1,66 @@
+# =============================================================================
+# Argo CD Helm values — Phase 1 minimal bootstrap.
+#
+# Design decision: argocd-server runs in --insecure mode (no internal TLS).
+# TLS terminates at ingress-nginx. This is the standard pattern when Argo CD
+# is fronted by an ingress controller — running double TLS either requires
+# SSL passthrough (losing L7 features like path routing and header rewrites)
+# or produces certificate-mismatch bugs.
+# Reference: https://argo-cd.readthedocs.io/en/stable/operator-manual/ingress/
+#
+# Interview-defensible framing:
+#   "I disabled argocd-server's internal TLS because I terminate TLS at the
+#    ingress controller. The alternative — SSL passthrough — would bypass
+#    L7 features I want at the edge, and trusting the cluster-internal
+#    network for service-to-service traffic is why we have Istio mTLS in
+#    Phase 4."
+#
+# Deferred to later phases:
+#   - SSO via Dex (Phase 4, once we have OIDC provider)
+#   - RBAC policies mapping GitHub teams → roles (Phase 4)
+#   - HA redis + multiple repo-server replicas (Phase 5)
+# For Phase 1 bootstrap: single replicas, built-in admin user.
+# =============================================================================
+
+global:
+  # Declares the canonical domain for Argo CD. Used for OAuth redirect URIs,
+  # self-referencing URLs in notifications, etc. Includes the :8443 port
+  # because that's where HTTPS actually lives on our kind setup (see
+  # kind.yaml for why 8443 and not 443).
+  domain: argocd.localtest.me:8443
+
+configs:
+  params:
+    # Turn off argocd-server's internal TLS. Traffic from ingress-nginx →
+    # argocd-server is plain HTTP inside the cluster.
+    server.insecure: true
+
+server:
+  # We create the Ingress resource in a separate manifest
+  # (clusters/kind/argocd-ingress.yaml) for two reasons:
+  #   1. Chart upgrades frequently touch the `server.ingress.*` schema; a
+  #      separate file isolates our custom annotations from that churn.
+  #   2. It lets you read the Ingress as a first-class Kubernetes resource
+  #      instead of as a chart side-effect.
+  ingress:
+    enabled: false
+
+  # ClusterIP — ingress-nginx hits the Service's cluster IP directly.
+  service:
+    type: ClusterIP
+
+# Single replicas everywhere for local dev. Production HA setup waits for
+# Phase 5 observability + scaling work.
+controller:
+  replicas: 1
+
+repoServer:
+  replicas: 1
+
+applicationSet:
+  replicas: 1
+
+redis:
+  # The chart ships a simple in-memory redis. For HA later, we'd swap to
+  # redis-ha or an external redis operator.
+  enabled: true

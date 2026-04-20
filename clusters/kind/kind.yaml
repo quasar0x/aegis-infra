@@ -68,24 +68,33 @@ nodes:
           kubeletExtraArgs:
             node-labels: "ingress-ready=true"
 
-    # Expose host 80/443 so https://<anything>.localtest.me on your
+    # Expose host 80/8443 so http(s)://<anything>.localtest.me on your
     # Mac hits ingress-nginx inside the kind container.
     #
     # containerPort = port inside the kind node container (where
-    #   ingress-nginx listens via hostPort).
+    #   ingress-nginx binds via hostPort — still 443 internally).
     # hostPort = port on your laptop's localhost.
     # listenAddress 127.0.0.1 = only localhost can reach this (not
     #   other machines on your Wi-Fi) — small security hygiene win.
     #
-    # If something else on your Mac already owns 80/443, change
-    # hostPort to e.g. 8080/8443 and adjust your ingress URLs.
+    # Why hostPort 8443 (not 443) for HTTPS?
+    # Docker Desktop on macOS has a known issue where TLS traffic on
+    # privileged port 443 gets reset during the handshake (specifically
+    # in the Mac → kind-container port-forward layer; HTTP on :80 is
+    # unaffected, and TLS works fine from inside the kind node).
+    # Moving HTTPS to an unprivileged port sidesteps the bug entirely.
+    #
+    # Interview angle: in real clusters you NEVER bind ingress directly
+    # to :443 on a pod anyway — a Cloud LB (ALB, NLB) or MetalLB
+    # terminates 443 and forwards to the ingress on an internal port.
+    # Using :8443 locally mirrors that prod architecture.
     extraPortMappings:
       - containerPort: 80
         hostPort: 80
         listenAddress: "127.0.0.1"
         protocol: TCP
       - containerPort: 443
-        hostPort: 443
+        hostPort: 8443
         listenAddress: "127.0.0.1"
         protocol: TCP
 

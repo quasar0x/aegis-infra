@@ -142,3 +142,78 @@ status: ## Show current kind cluster and registry status
 	@echo "=== registry container ==="
 	@docker ps -a --filter "name=^$(REG_NAME)$$" \
 	  --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+
+# =============================================================================
+# Phase 1 — Argo CD bootstrap.
+#
+# The one-time imperative step before everything becomes GitOps-managed.
+# Two tools, two namespaces:
+#   - ingress-nginx in the 'ingress-nginx' namespace (edge routing)
+#   - argo-cd      in the 'platform' namespace (per PROJECT.md §2)
+#
+# Chart versions are PINNED. Bump deliberately (via Renovate PR in Phase 3),
+# never implicitly. This is how you defeat the silent-drift class of bugs.
+# =============================================================================
+
+INGRESS_NGINX_CHART_VERSION := 4.11.3
+ARGOCD_CHART_VERSION        := 7.6.12
+
+.PHONY: helm-repos ingress-install argocd-tls argocd-install argocd-bootstrap argocd-password
+
+helm-repos: ## Add/update Helm repos (idempotent)
+	@helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null || true
+	@helm repo add argo          https://argoproj.github.io/argo-helm       2>/dev/null || true
+	@helm repo update >/dev/null
+
+ingress-install: helm-repos ## Install ingress-nginx into its own namespace
+	@echo "==> installing ingress-nginx (chart $(INGRESS_NGINX_CHART_VERSION))"
+	@helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+	    --version $(INGRESS_NGINX_CHART_VERSION) \
+	    --namespace ingress-nginx --create-namespace \
+	    -f clusters/kind/ingress-nginx-values.yaml \
+	    --wait --timeout 5m
+
+# Generates a self-signed cert for argocd.localtest.me and stores it as
+# the 'argocd-server-tls' Secret. Idempotent — re-running does nothing if
+# the Secret already exists. Phase 4 replaces this whole target with a
+# cert-manager ClusterIssuer + Certificate resource.
+argocd-tls: ## Generate self-signed TLS cert Secret for the Argo CD ingress
+	@kubectl get ns platform >/dev/null 2>&1 || kubectl create namespace platform
+	@if kubectl -n platform get secret argocd-server-tls >/dev/null 2>&1; then \
+	  echo "==> argocd-server-tls Secret already exists (skip)"; \
+	else \
+	  echo "==> generating self-signed cert for argocd.localtest.me"; \
+	  TMP=$$(mktemp -d) && \
+	  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+	      -subj "/CN=argocd.localtest.me" \
+	      -addext "subjectAltName=DNS:argocd.localtest.me" \
+	      -keyout "$$TMP/tls.key" -out "$$TMP/tls.crt" >/dev/null 2>&1 && \
+	  kubectl -n platform create secret tls argocd-server-tls \
+	      --cert="$$TMP/tls.crt" --key="$$TMP/tls.key" && \
+	  rm -rf "$$TMP"; \
+	fi
+
+argocd-install: helm-repos argocd-tls ## Install Argo CD into 'platform' and apply its Ingress
+	@echo "==> installing argo-cd (chart $(ARGOCD_CHART_VERSION))"
+	@helm upgrade --install argocd argo/argo-cd \
+	    --version $(ARGOCD_CHART_VERSION) \
+	    --namespace platform --create-namespace \
+	    -f clusters/kind/argocd-values.yaml \
+	    --wait --timeout 10m
+	@echo "==> applying argocd ingress"
+	@kubectl apply -f clusters/kind/argocd-ingress.yaml
+
+argocd-password: ## Print the initial admin password
+	@kubectl -n platform get secret argocd-initial-admin-secret \
+	    -o jsonpath='{.data.password}' | base64 -d
+	@echo ""
+
+argocd-bootstrap: ingress-install argocd-install ## Full Argo CD bootstrap
+	@echo ""
+	@echo "✓ Argo CD bootstrapped."
+	@echo "  URL:      https://argocd.localtest.me:8443"
+	@echo "  Username: admin"
+	@echo "  Password: $$(kubectl -n platform get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+	@echo ""
+	@echo "  First visit: your browser will warn about the self-signed cert."
+	@echo "  That's expected — cert-manager + real TLS come in Phase 4."
