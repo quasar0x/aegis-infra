@@ -1,0 +1,64 @@
+# =============================================================================
+# ingress-nginx Helm values — kind-specific.
+#
+# Why this file exists separately from the chart's defaults:
+#   1. kind has no cloud load balancer. Service type LoadBalancer would sit
+#      <pending> forever. We use hostPort instead — the controller pod binds
+#      directly to the node's port 80/443.
+#   2. Only the control-plane node has the `ingress-ready=true` label (set in
+#      kind.yaml) AND the extraPortMappings for 80/443. ingress-nginx must
+#      tolerate the control-plane taint AND match that nodeSelector, or it
+#      will never schedule.
+#
+# This is the same Helm chart you'd use on EKS — only the values change. On
+# EKS you'd swap to `service.type: LoadBalancer` + ALB annotations. That
+# parity is the whole point of the local-aws dual-target strategy (§4).
+# =============================================================================
+
+controller:
+  # Single replica. We have exactly one node that's eligible to host
+  # ingress-nginx (the CP, labeled ingress-ready=true). Extra replicas would
+  # stay Pending forever.
+  replicaCount: 1
+
+  # Schedule on the control-plane node specifically.
+  nodeSelector:
+    ingress-ready: "true"
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Equal
+      effect: NoSchedule
+
+  # Bind port 80/443 directly on the node's host network. Combined with the
+  # kind.yaml extraPortMappings, this is the bridge:
+  #   Mac localhost:443 → kind container port 443 → pod hostPort 443.
+  hostPort:
+    enabled: true
+    ports:
+      http: 80
+      https: 443
+
+  # ClusterIP is enough — hostPort handles external access. On EKS this
+  # becomes `type: LoadBalancer` with AWS Load Balancer Controller annotations.
+  service:
+    type: ClusterIP
+
+  # Register a default IngressClass so resources omitting ingressClassName
+  # still work. We'll still set ingressClassName: nginx explicitly on our
+  # Ingress manifests for clarity.
+  ingressClassResource:
+    default: true
+
+  # Validating admission webhook — catches malformed Ingress resources at
+  # creation time rather than silently failing to route. Worth the couple of
+  # seconds it adds to install.
+  admissionWebhooks:
+    enabled: true
+
+  # Small footprint for local dev. EKS values would scale these up.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
