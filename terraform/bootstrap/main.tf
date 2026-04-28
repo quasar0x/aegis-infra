@@ -197,3 +197,26 @@ data "aws_iam_policy_document" "tf_state_bucket_policy" {
 # API provides the mutex, eliminating the need for a separate DynamoDB table.
 # Simpler, fewer moving parts, one less resource in the blast radius.
 # -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Daily budget alarm.
+#
+# Lives in bootstrap (not envs/burst/) because the budget must protect the
+# account regardless of whether any env is currently applied. If it lived in
+# envs/burst/, `terraform destroy` on burst would remove the safety net at
+# exactly the moment you depend on it most.
+#
+# This is the third teardown safety net in PROJECT.md §9. The first two —
+# `make eks-down` and the scheduled GitHub Action — assume code paths run.
+# A budget alarm is the backstop for "I forgot."
+# -----------------------------------------------------------------------------
+
+module "budget" {
+  source = "../modules/budget"
+
+  name            = "aegis"
+  email           = var.budget_email
+  daily_limit_usd = var.daily_budget_usd
+
+  tags = local.common_tags
+}

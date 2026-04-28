@@ -21,3 +21,18 @@ output "region" {
   description = "Region the backend lives in."
   value       = var.region
 }
+
+# -----------------------------------------------------------------------------
+# Budget outputs — surfaced so other configs (and future Slack/PagerDuty
+# subscribers) can attach to the same SNS topic without re-deriving the ARN.
+# -----------------------------------------------------------------------------
+
+output "budget_name" {
+  description = "Name of the daily AWS Budget."
+  value       = module.budget.budget_name
+}
+
+output "budget_sns_topic_arn" {
+  description = "ARN of the SNS topic carrying budget notifications. Add Slack/PagerDuty subscribers here."
+  value       = module.budget.sns_topic_arn
+}

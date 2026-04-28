@@ -26,3 +26,19 @@ variable "state_bucket_prefix" {
   type        = string
   default     = "aegis-tf-state"
 }
+
+variable "budget_email" {
+  description = <<-EOT
+    Email address that receives daily-budget notifications. Defaults to the
+    address the Aegis AWS account was created with. AWS sends a confirmation
+    link on first apply — click it before alerts will deliver.
+  EOT
+  type        = string
+  default     = "danielaiops92@gmail.com"
+}
+
+variable "daily_budget_usd" {
+  description = "Daily spend cap in USD. PROJECT.md §9 specifies $5; bump only with deliberate justification."
+  type        = number
+  default     = 5
+}
