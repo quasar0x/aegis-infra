@@ -74,15 +74,20 @@ jobs:
         run: terraform -chdir=${{ matrix.dir }} validate
 
   # -----------------------------------------------------------------------------
-  # Unit-test the rego policies. The job is gated on terraform/policies/
-  # actually containing rego files — when this workflow merges before the
-  # conftest-policies PR does (or vice versa), this job skips cleanly instead
-  # of failing on a missing directory.
+  # Unit-test the rego policies in terraform/policies/. Runs unconditionally
+  # because the policies are a permanent part of the repo (landed in PR #6).
+  #
+  # Lesson learned: an earlier version of this job had
+  #   if: ${{ hashFiles('terraform/policies/**/*.rego') != '' }}
+  # at the JOB level. That's invalid — hashFiles() is only available at
+  # step level, because the runner hasn't checked out the repo when the
+  # job-level expression is evaluated. The whole workflow refused to
+  # start on every push to main. If we ever need to gate a job again,
+  # do it via a step-level guard that sets a job output, not at job-if.
   # -----------------------------------------------------------------------------
   conftest-verify:
     name: conftest verify
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('terraform/policies/**/*.rego') != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install conftest
