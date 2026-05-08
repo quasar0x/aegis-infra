@@ -7,11 +7,12 @@
 #   - The Ingress is visible as a first-class K8s resource — you can read
 #     exactly how traffic enters without spelunking through Helm templates.
 #
-# TLS: `tls[0].secretName: argocd-server-tls` points at a Secret we do NOT
-# create. ingress-nginx falls back to its "Kubernetes Ingress Controller
-# Fake Certificate" (self-signed), which is why the browser will show a
-# cert warning the first time. Phase 4 brings cert-manager with a
-# ClusterIssuer that creates this Secret for real.
+# TLS: `tls[0].secretName: argocd-server-tls` points at a Secret created by
+# the Makefile's `argocd-tls` target — a self-signed cert for
+# argocd.localtest.me valid for 365 days. Browsers will show a cert warning
+# (it's self-signed, not from a public CA) but TLS handshakes succeed.
+# Phase 4 replaces this with a cert-manager ClusterIssuer + Certificate
+# resource so the Secret is reissued automatically.
 # =============================================================================
 
 apiVersion: networking.k8s.io/v1
@@ -33,8 +34,9 @@ spec:
   tls:
     - hosts:
         - argocd.localtest.me
-      # Secret intentionally doesn't exist yet. ingress-nginx will serve its
-      # default self-signed cert until Phase 4 replaces it via cert-manager.
+      # Secret is created by `make argocd-tls` (a one-time openssl-generated
+      # self-signed cert). Phase 4 replaces this with cert-manager-issued
+      # certs that rotate automatically.
       secretName: argocd-server-tls
   rules:
     - host: argocd.localtest.me
