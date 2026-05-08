@@ -37,3 +37,19 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "create_interface_endpoints" {
+  description = <<-EOT
+    If true, creates ECR-API/ECR-DKR/STS interface endpoints in the
+    private subnets and a security group to fence them. Default false
+    because the VPC alone is free, but interface endpoints cost
+    ~$0.01/hr per endpoint per AZ — 3 services × 3 AZs ≈ $2/day the
+    moment they exist, regardless of whether anything is consuming them.
+
+    Flip to true only when running EKS workloads that need private
+    egress to AWS APIs without going via the IGW. The S3 gateway
+    endpoint is unconditional and always created (it is free).
+  EOT
+  type        = bool
+  default     = false
+}

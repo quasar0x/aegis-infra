@@ -52,6 +52,6 @@ output "private_route_table_id" {
 }
 
 output "vpc_endpoints_security_group_id" {
-  description = "ID of the security group attached to interface VPC endpoints."
-  value       = aws_security_group.vpc_endpoints.id
+  description = "ID of the security group attached to interface VPC endpoints. null when var.create_interface_endpoints is false."
+  value       = var.create_interface_endpoints ? aws_security_group.vpc_endpoints[0].id : null
 }
