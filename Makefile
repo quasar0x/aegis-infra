@@ -217,3 +217,41 @@ argocd-bootstrap: ingress-install argocd-install ## Full Argo CD bootstrap
 	@echo ""
 	@echo "  First visit: your browser will warn about the self-signed cert."
 	@echo "  That's expected — cert-manager + real TLS come in Phase 4."
+
+# =============================================================================
+# Phase 1 — Conftest policies on Terraform plans.
+#
+# Per PROJECT.md §5 Phase 1 deliverable: gate every TF plan with custom
+# organizational policies before apply. Two-step pipeline:
+#   1. tf-policy-verify  — unit-test the rego policies themselves
+#   2. tf-policy         — run the policies against a real plan JSON
+#
+# Both run locally via `make`, and (Phase 3) will be wired into CI as the
+# same commands. CI never runs `terraform apply` — only plan + lint.
+#
+# Cost note: `terraform plan` against envs/burst makes read-only AWS API
+# calls (DescribeVpcs, DescribeSubnets, etc.) — no spend. The -lock=false
+# flag avoids contending with anyone else's apply.
+# =============================================================================
+
+CONFTEST_POLICIES   := terraform/policies
+TF_BURST_DIR        := terraform/envs/burst
+
+.PHONY: tf-policy tf-policy-verify
+
+tf-policy-verify: ## Run unit tests for the Conftest rego policies themselves
+	@command -v conftest >/dev/null 2>&1 || { echo "conftest missing — brew install conftest"; exit 1; }
+	@echo "==> verifying rego policies in $(CONFTEST_POLICIES)"
+	@conftest verify --policy $(CONFTEST_POLICIES)
+
+tf-policy: tf-policy-verify ## Run Conftest against the burst env's terraform plan
+	@command -v terraform >/dev/null 2>&1 || { echo "terraform missing"; exit 1; }
+	@echo "==> generating plan for $(TF_BURST_DIR)"
+	@cd $(TF_BURST_DIR) && AWS_PROFILE=$${AWS_PROFILE:-aegis} \
+	    terraform plan -out=tfplan -lock=false >/dev/null
+	@echo "==> exporting plan as JSON"
+	@cd $(TF_BURST_DIR) && terraform show -json tfplan > tfplan.json
+	@echo "==> running conftest"
+	@conftest test --policy $(CONFTEST_POLICIES) $(TF_BURST_DIR)/tfplan.json
+	@rm -f $(TF_BURST_DIR)/tfplan $(TF_BURST_DIR)/tfplan.json
+	@echo "✓ Conftest policies passed."
