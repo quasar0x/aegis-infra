@@ -1,0 +1,96 @@
+# =============================================================================
+# Aegis CI — runs on every pull request and every push to main.
+#
+# Three independent gates:
+#   1. terraform fmt — catches whitespace/formatting drift across the tree
+#   2. terraform validate — checks syntax + types per directory (matrix)
+#   3. conftest verify — unit-tests the rego policies in terraform/policies
+#
+# Deliberately NOT in this workflow:
+#   - terraform plan with real AWS creds. That needs OIDC federation
+#     (PROJECT.md §5 Phase 1 "First AWS Burst" deliverable). Will land
+#     in a follow-up workflow once OIDC is wired.
+#   - tflint. Adding it would require a .tflint.hcl config tuned for our
+#     conventions. Worth doing as a separate PR.
+#
+# Versions are pinned. Update via Renovate (Phase 3).
+# =============================================================================
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.14.8
+  CONFTEST_VERSION: "0.59.0"
+
+jobs:
+  # -----------------------------------------------------------------------------
+  # Whole-tree formatting check. Fast, catches the "I forgot to fmt" class.
+  # -----------------------------------------------------------------------------
+  terraform-fmt:
+    name: terraform fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive terraform/
+
+  # -----------------------------------------------------------------------------
+  # Per-directory init + validate. Matrix so each dir reports independently.
+  # -backend=false skips backend init — no AWS creds needed for syntax checks.
+  # -----------------------------------------------------------------------------
+  terraform-validate:
+    name: validate (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - terraform/bootstrap
+          - terraform/envs/burst
+          - terraform/modules/vpc
+          - terraform/modules/budget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform init (no backend)
+        run: terraform -chdir=${{ matrix.dir }} init -backend=false -input=false
+      - name: terraform validate
+        run: terraform -chdir=${{ matrix.dir }} validate
+
+  # -----------------------------------------------------------------------------
+  # Unit-test the rego policies. The job is gated on terraform/policies/
+  # actually containing rego files — when this workflow merges before the
+  # conftest-policies PR does (or vice versa), this job skips cleanly instead
+  # of failing on a missing directory.
+  # -----------------------------------------------------------------------------
+  conftest-verify:
+    name: conftest verify
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('terraform/policies/**/*.rego') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install conftest
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
+            | tar xz -C /tmp
+          sudo mv /tmp/conftest /usr/local/bin/conftest
+          conftest --version
+      - name: conftest verify
+        run: conftest verify --policy terraform/policies
