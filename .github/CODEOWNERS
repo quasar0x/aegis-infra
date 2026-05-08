@@ -1,17 +1,17 @@
- # CODEOWNERS — see https://docs.github.com/articles/about-code-owners
-  #
-  # Syntax: <path glob>   <owner1> [<owner2> ...]
-  # Later lines win. Blank = no owner. Each PR auto-requests review from
-  # every matched owner.
+# CODEOWNERS — see https://docs.github.com/articles/about-code-owners
+#
+# Syntax: <path glob>   <owner1> [<owner2> ...]
+# Later lines win. Blank = no owner. Each PR auto-requests review from
+# every matched owner.
 
-  # Default: the user owns everything until collaborators arrive.
-  *                       @quasar0x
+# Default: the user owns everything until collaborators arrive.
+*                       @quasar0x
 
-  # Once these paths are added, they'll already be scoped.
-  /clusters/              @quasar0x
-  /terraform/             @quasar0x
-  /terraform/modules/     @quasar0x
-  # /.github/workflows/   @quasar0x   # uncomment when CI is added
+# Once these paths are added, they'll already be scoped.
+/clusters/              @quasar0x
+/terraform/             @quasar0x
+/terraform/modules/     @quasar0x
+# /.github/workflows/   @quasar0x   # uncomment when CI is added
 
-  # Kept as a future-proofing example — delete this block if unused.
-  # /terraform/envs/prod/  @quasar0x @security-lead
+# Kept as a future-proofing example — delete this block if unused.
+# /terraform/envs/prod/  @quasar0x @security-lead
