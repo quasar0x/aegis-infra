@@ -202,7 +202,14 @@ resource "aws_vpc_endpoint" "s3" {
 # --- Security group for interface endpoints ---
 # Interface endpoints need a security group. We allow 443/tcp from inside
 # the VPC — enough for every AWS SDK call. Tight enough to be defensible.
+#
+# Gated by var.create_interface_endpoints (default false). When false, no
+# SG is created — the interface endpoints don't exist either, so nothing
+# would attach to it. count = 0/1 is the standard pattern for conditional
+# single-instance resources.
 resource "aws_security_group" "vpc_endpoints" {
+  count = var.create_interface_endpoints ? 1 : 0
+
   name_prefix = "${var.name}-vpce-"
   description = "Allow HTTPS from inside the VPC to interface endpoints"
   vpc_id      = aws_vpc.main.id
@@ -232,6 +239,11 @@ resource "aws_security_group" "vpc_endpoints" {
 # A single aws_vpc_endpoint resource per service, each placed in all private
 # subnets. `private_dns_enabled = true` is the magic that makes the AWS SDK
 # use the endpoint automatically — no SDK config changes required.
+#
+# Gated by var.create_interface_endpoints. Default false because each
+# endpoint costs ~$0.01/hr per AZ × 3 AZs × 3 services ≈ $2/day, and
+# the VPC by itself is free. EKS-related work that actually needs these
+# flips the flag at the env level for the duration of the burst.
 locals {
   interface_endpoint_services = {
     "ecr-api" = "com.amazonaws.${data.aws_region.current.name}.ecr.api"
@@ -241,7 +253,7 @@ locals {
 }
 
 resource "aws_vpc_endpoint" "interface" {
-  for_each = local.interface_endpoint_services
+  for_each = var.create_interface_endpoints ? local.interface_endpoint_services : {}
 
   vpc_id              = aws_vpc.main.id
   service_name        = each.value
@@ -253,7 +265,7 @@ resource "aws_vpc_endpoint" "interface" {
   # endpoint's private DNS name resolves to the private IPs from any
   # subnet in the VPC.
   subnet_ids         = [for s in aws_subnet.private : s.id]
-  security_group_ids = [aws_security_group.vpc_endpoints.id]
+  security_group_ids = [aws_security_group.vpc_endpoints[0].id]
 
   tags = merge(local.module_tags, {
     Name = "${var.name}-vpce-${each.key}"
